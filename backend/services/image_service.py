@@ -13,15 +13,17 @@ from services.metrics_service import record_muse_image_count
 load_dotenv()
 
 MAX_IMAGES_PER_RUN = 3
-_image_count = 0
+_image_counts: dict[str, int] = {}
 _IMAGE_COUNT_LOCK = threading.Lock()
 
 
-def reset_image_count() -> None:
-    global _image_count
+def reset_image_count(run_id: str | None = None) -> None:
     with _IMAGE_COUNT_LOCK:
-        _image_count = 0
-        record_muse_image_count(_image_count)
+        if run_id is None:
+            _image_counts.clear()
+        else:
+            _image_counts.pop(run_id, None)
+        record_muse_image_count(sum(_image_counts.values()))
 
 
 def _png_bytes(response) -> bytes:
@@ -50,23 +52,27 @@ def _png_bytes(response) -> bytes:
 
 
 def restyle_object(
-    object_image_bytes: bytes, theme: str, label: str = "object"
+    object_image_bytes: bytes,
+    theme: str,
+    label: str = "object",
+    run_id: str | None = None,
 ) -> bytes | None:
     if not object_image_bytes:
         raise ValueError("An object crop is required to restyle an asset")
 
-    global _image_count
+    count_key = run_id or "default"
     with _IMAGE_COUNT_LOCK:
-        if _image_count >= MAX_IMAGES_PER_RUN:
-            record_muse_image_count(_image_count)
+        image_count = _image_counts.get(count_key, 0)
+        if image_count >= MAX_IMAGES_PER_RUN:
+            record_muse_image_count(sum(_image_counts.values()))
             return None
 
         api_key = os.getenv("MODEL_API_KEY")
         if not api_key:
             raise RuntimeError("MODEL_API_KEY is required to call the Meta Model API")
 
-        _image_count += 1
-        record_muse_image_count(_image_count)
+        _image_counts[count_key] = image_count + 1
+        record_muse_image_count(sum(_image_counts.values()))
 
     client = OpenAI(
         api_key=api_key,

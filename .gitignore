@@ -6,4 +6,5 @@ __pycache__/
 node_modules/
 assets/*.jpeg
 !/assets/desk_smoke_test.jpeg
+assets/restyle_cache/
 demo_metrics.json

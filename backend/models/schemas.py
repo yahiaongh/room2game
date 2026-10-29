@@ -37,3 +37,9 @@ class GameRules(StrictModel):
     collectibles: list[CollectibleRole]
     win_condition: str
     theme: str
+
+
+class RestyleRequest(StrictModel):
+    image_id: str
+    object_index: int
+    theme: str

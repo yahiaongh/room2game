@@ -20,6 +20,56 @@
     0x9ca45f,
   ];
 
+  function choosePlayerStart(sceneData) {
+    const width = sceneData.canvas.width;
+    const height = sceneData.canvas.height;
+    const provided = sceneData.rules.player_start || {};
+    const start = {
+      x: Phaser.Math.Clamp(Number(provided.x) || 0, 0, width),
+      y: Phaser.Math.Clamp(Number(provided.y) || 0, 0, height),
+    };
+    const platforms = sceneData.rules.platforms
+      .map((entry) => {
+        const object = sceneData.objects[entry.object_index];
+        const [left, top, right, bottom] = object.bbox || [];
+        const vertices = object.physics;
+        const finiteVertices = Array.isArray(vertices) && vertices.every((point) => (
+          point && Number.isFinite(point.x) && Number.isFinite(point.y)
+        ));
+        const xs = finiteVertices ? vertices.map((point) => point.x) : [left, right];
+        const ys = finiteVertices ? vertices.map((point) => point.y) : [top, bottom];
+        if (![...xs, ...ys].every(Number.isFinite)) return null;
+        const minY = Math.min(...ys);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        return {
+          centerX: (minX + maxX) / 2,
+          topY: minY,
+          centerY: (minY + Math.max(...ys)) / 2,
+          area: Number(object.area_ratio) || Math.max(0, right - left) * Math.max(0, bottom - top),
+        };
+      })
+      .filter(Boolean);
+    if (!platforms.length) return start;
+
+    const nearest = platforms.reduce((best, platform) => (
+      Math.hypot(platform.centerX - start.x, platform.centerY - start.y)
+        < Math.hypot(best.centerX - start.x, best.centerY - start.y)
+        ? platform
+        : best
+    ));
+    if (sceneData.meta?.rules_fallback || start.y < nearest.topY - 100) {
+      const largest = platforms.reduce((best, platform) => (
+        platform.area > best.area ? platform : best
+      ));
+      return {
+        x: Phaser.Math.Clamp(largest.centerX, 0, width),
+        y: Phaser.Math.Clamp(largest.topY - 50, 0, height),
+      };
+    }
+    return start;
+  }
+
   function assertSceneData(sceneData) {
     if (!sceneData || !Array.isArray(sceneData.objects) || !sceneData.rules) {
       throw new TypeError("Scene data must include objects and rules.");
@@ -106,10 +156,7 @@
     let score = 0;
     const collected = new Set();
     const collectiblesById = new Map();
-    const savedPlayerStart = {
-      x: Phaser.Math.Clamp(Number(sceneData.rules.player_start.x) || 0, 0, width),
-      y: Phaser.Math.Clamp(Number(sceneData.rules.player_start.y) || 0, 0, height),
-    };
+    const savedPlayerStart = choosePlayerStart(sceneData);
 
     class RoomScene extends Phaser.Scene {
       constructor() {
@@ -141,6 +188,8 @@
 
         this.levelGraphics = this.add.graphics().setDepth(2);
         this.playerGraphics = this.add.graphics().setDepth(4);
+        this.spriteObjectIndices = new Set();
+        this.spriteImages = new Map();
         this.drawObjects(sceneData.objects, "platform");
         this.drawObjects(sceneData.objects, "hazard");
         this.drawObjects(sceneData.objects, "collectible");
@@ -199,12 +248,14 @@
           winElement.textContent = sceneData.rules.win_condition || "Reach the end.";
         }
         if (scoreElement) scoreElement.textContent = "0 points";
+        this.requestRestyledSprites();
       }
 
       drawObjects(objects, role) {
         const roleEntries = sceneData.rules[`${role}s`];
         roleEntries.forEach((entry, order) => {
           const object = objects[entry.object_index];
+          if (this.spriteObjectIndices.has(entry.object_index)) return;
           const points = object.display;
           if (!Array.isArray(points) || points.length < 3) return;
           const color = role === "platform"
@@ -232,6 +283,115 @@
           this.add.image((left + right) / 2, (top + bottom) / 2, key)
             .setDisplaySize(Math.max(1, right - left), Math.max(1, bottom - top))
             .setDepth(3);
+        }
+      }
+
+      requestRestyledSprites() {
+        if (!sceneData.image_id) return;
+        const objectIndices = new Set();
+        for (const role of ["platforms", "hazards", "collectibles"]) {
+          for (const entry of sceneData.rules[role]) {
+            const object = sceneData.objects[entry.object_index];
+            if (object.label !== "ground") objectIndices.add(entry.object_index);
+          }
+        }
+        for (const objectIndex of objectIndices) {
+          this.loadRestyledSprite(objectIndex);
+        }
+      }
+
+      async loadRestyledSprite(objectIndex) {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 5000);
+        try {
+          const apiOrigin = window.location.port === "8000"
+            ? ""
+            : "http://localhost:8000";
+          const response = await fetch(`${apiOrigin}/restyle`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              image_id: sceneData.image_id,
+              object_index: objectIndex,
+              theme: sceneData.rules.theme || "pixel art",
+            }),
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || `Restyle request failed (${response.status}).`);
+          }
+          const payload = await response.json();
+          if (typeof payload.png_base64 !== "string" || !payload.png_base64) {
+            throw new Error("Restyle response did not contain a PNG.");
+          }
+          if (!this.sys.isActive()) return;
+
+          const themeKey = (sceneData.rules.theme || "pixel-art")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "");
+          const textureKey = `restyle-${sceneData.image_id}-${objectIndex}-${themeKey}`;
+          const addSprite = () => {
+            if (!this.sys.isActive() || this.spriteImages.has(objectIndex)) return;
+            const object = sceneData.objects[objectIndex];
+            const [left, top, right, bottom] = object.bbox;
+            const sprite = this.add.image(
+              (left + right) / 2,
+              (top + bottom) / 2,
+              textureKey,
+            );
+            const source = this.textures.get(textureKey).getSourceImage();
+            const scale = Math.min(
+              Math.max(1, right - left) / source.width,
+              Math.max(1, bottom - top) / source.height,
+            );
+            sprite.setScale(scale).setDepth(3);
+            this.spriteImages.set(objectIndex, sprite);
+            this.spriteObjectIndices.add(objectIndex);
+            this.redrawLevel();
+          };
+
+          if (this.textures.exists(textureKey)) {
+            addSprite();
+          } else {
+            const clearTextureListeners = () => {
+              this.textures.off(Phaser.Textures.Events.LOAD, onTextureLoad);
+              this.textures.off(Phaser.Textures.Events.ERROR, onTextureError);
+              window.clearTimeout(textureTimeout);
+            };
+            const onTextureLoad = (loadedKey) => {
+              if (loadedKey !== textureKey) return;
+              clearTextureListeners();
+              addSprite();
+            };
+            const onTextureError = (failedKey) => {
+              if (failedKey !== textureKey) return;
+              clearTextureListeners();
+              console.warn(
+                `Restyle image could not be decoded for object ${objectIndex}; keeping its polygon fallback.`,
+              );
+            };
+            const textureTimeout = window.setTimeout(() => {
+              clearTextureListeners();
+              console.warn(
+                `Restyle image timed out for object ${objectIndex}; keeping its polygon fallback.`,
+              );
+            }, 5000);
+            this.textures.on(Phaser.Textures.Events.LOAD, onTextureLoad);
+            this.textures.on(Phaser.Textures.Events.ERROR, onTextureError);
+            this.textures.addBase64(
+              textureKey,
+              `data:image/png;base64,${payload.png_base64}`,
+            );
+          }
+        } catch (error) {
+          console.warn(
+            `Restyle unavailable for object ${objectIndex}; keeping its polygon fallback.`,
+            error,
+          );
+        } finally {
+          window.clearTimeout(timeout);
         }
       }
 
@@ -299,11 +459,14 @@
         score += entry && Number.isFinite(entry.points) ? entry.points : 10;
         this.collectibleBodies.delete(bodyId);
         this.matter.world.remove(this.bodiesById.get(bodyId));
+        if (entry && this.spriteImages.has(entry.object_index)) {
+          this.spriteImages.get(entry.object_index).setVisible(false);
+        }
         if (scoreElement) scoreElement.textContent = `${score} point${score === 1 ? "" : "s"}`;
         this.drawCollectedState();
       }
 
-      drawCollectedState() {
+      redrawLevel() {
         this.levelGraphics.clear();
         this.drawObjects(sceneData.objects, "platform");
         this.drawObjects(sceneData.objects, "hazard");
@@ -315,8 +478,13 @@
         this.drawObjectsForList(keepEntries, ROLE_COLORS.collectible);
       }
 
+      drawCollectedState() {
+        this.redrawLevel();
+      }
+
       drawObjectsForList(entries, color) {
         for (const entry of entries) {
+          if (this.spriteObjectIndices.has(entry.object_index)) continue;
           const object = sceneData.objects[entry.object_index];
           if (!object || !Array.isArray(object.display)) continue;
           this.levelGraphics.fillStyle(color, 0.9);
@@ -348,6 +516,10 @@
           const body = this.bodiesById.get(bodyId);
           if (body) this.matter.world.add(body);
           this.collectibleBodies.add(bodyId);
+          const entry = collectiblesById.get(bodyId);
+          if (entry && this.spriteImages.has(entry.object_index)) {
+            this.spriteImages.get(entry.object_index).setVisible(true);
+          }
         }
         collected.clear();
         score = 0;

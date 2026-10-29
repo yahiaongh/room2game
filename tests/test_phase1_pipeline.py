@@ -88,6 +88,7 @@ class PolygonServiceTests(unittest.TestCase):
         ).reshape(-1, 1, 2)
         self.assertFalse(cv2.isContourConvex(display))
         self.assertTrue(cv2.isContourConvex(physics))
+        self.assertGreater(len(display), len(physics))
 
 
 class SAMMaskTests(unittest.TestCase):
@@ -117,6 +118,12 @@ class GenerateEndpointTests(unittest.TestCase):
         self.metrics_patch.start()
         self.addCleanup(self.metrics_patch.stop)
         self.addCleanup(self.metrics_directory.cleanup)
+        self.restyle_directory = tempfile.TemporaryDirectory()
+        self.restyle_path = Path(self.restyle_directory.name) / "restyle_cache"
+        self.restyle_patch = patch.object(main, "RESTYLE_CACHE_DIR", self.restyle_path)
+        self.restyle_patch.start()
+        self.addCleanup(self.restyle_patch.stop)
+        self.addCleanup(self.restyle_directory.cleanup)
 
         self.local_mask = make_mask((100, 60), (0, 0, 99, 59))
         self.segment_patch = patch.object(
@@ -153,7 +160,11 @@ class GenerateEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
-        self.assertEqual(set(payload), {"objects", "rules", "canvas", "meta"})
+        self.assertEqual(
+            set(payload),
+            {"objects", "rules", "canvas", "image_id", "meta"},
+        )
+        self.assertRegex(payload["image_id"], r"^[a-f0-9]{64}$")
         self.assertEqual(
             payload["meta"]["debug_sam_status"],
             "SAM returned 1 masks; 1 objects retained",
@@ -183,6 +194,57 @@ class GenerateEndpointTests(unittest.TestCase):
                 "keyboard",
             ],
         )
+
+    def test_restyle_crops_source_caches_png_and_returns_cache_hit(self):
+        with patch.object(main, "generate_game_rules", return_value=valid_rules()):
+            generated = self.post_generate()
+        image_id = generated.json()["image_id"]
+        png_bytes = make_mask((8, 8), (1, 1, 6, 6))
+        with patch.object(main, "restyle_object", return_value=png_bytes) as restyle_mock:
+            response = self.client.post(
+                "/restyle",
+                json={
+                    "image_id": image_id,
+                    "object_index": 0,
+                    "theme": "pixel art",
+                },
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertFalse(response.json()["cached"])
+            self.assertEqual(
+                base64.b64decode(response.json()["png_base64"]),
+                png_bytes,
+            )
+            crop_bytes = restyle_mock.call_args.args[0]
+            with Image.open(io.BytesIO(crop_bytes)) as crop:
+                self.assertEqual(crop.size, (100, 60))
+
+            cached = self.client.post(
+                "/restyle",
+                json={
+                    "image_id": image_id,
+                    "object_index": 0,
+                    "theme": "pixel art",
+                },
+            )
+            self.assertEqual(cached.status_code, 200, cached.text)
+            self.assertTrue(cached.json()["cached"])
+            self.assertEqual(
+                base64.b64decode(cached.json()["png_base64"]),
+                png_bytes,
+            )
+            restyle_mock.assert_called_once()
+
+    def test_restyle_rejects_unknown_image_id(self):
+        response = self.client.post(
+            "/restyle",
+            json={
+                "image_id": "0" * 64,
+                "object_index": 0,
+                "theme": "pixel art",
+            },
+        )
+        self.assertEqual(response.status_code, 404)
 
     def test_injects_ground_when_spark_returns_no_platforms(self):
         with patch.object(

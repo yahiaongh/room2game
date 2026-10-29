@@ -11,7 +11,9 @@ Room2Game explores real-to-simulation by extracting objects and their geometry
 from an ordinary desk or room photo, then mapping them into a small interactive
 world. `POST /generate` returns filtered object polygons, validated game rules,
 and resized canvas dimensions; the Phaser 3 frontend turns that response into a
-Matter.js platformer with keyboard and touch controls. This can become a
+Matter.js platformer with keyboard and touch controls. Muse Image restyles
+objects asynchronously while the playable polygon fallbacks remain active.
+This can become a
 lightweight source of varied scenes for robotics training and evaluation. The
 longer-term direction is interactive world models: agents should be able to
 inspect a real environment, reason about its objects, and act on a simulated
@@ -34,7 +36,10 @@ partner endpoint directly. If generated rules are invalid or the request times
 out, `/generate` builds safe deterministic fallback rules.
 
 **Muse Image** generates a pixel-art asset for an object label through the Meta
-Images API. A per-run cap of three images limits generation cost.
+Images API. `POST /restyle` crops objects from the source photo and caches
+generated PNGs by image, object, and theme. The browser requests sprites without
+blocking gameplay; if generation is unavailable, the polygon remains visible.
+A per-photo cap of three images limits generation cost.
 
 ## Which bonus prizes this targets
 
@@ -88,8 +93,12 @@ Open `http://localhost:8001`. The frontend sends photo uploads to
 `http://localhost:8000/generate`; optionally set the `theme` query parameter.
 `GET http://localhost:8000/health` is the API health check. Response
 coordinates use the resized canvas space. `/generate` also returns a `meta`
-object with `debug_sam_status`, making SAM API failures, empty results, and
-filtered masks visible in the response and server log.
+object with `debug_sam_status` and `rules_fallback`, making SAM API failures,
+empty results, filtered masks, and rules fallback visible in the response and
+server log. The response `image_id` is used by `POST /restyle`; send
+`{"image_id":"<id>","object_index":0,"theme":"pixel art"}` as JSON. Generated
+assets and source crops are cached locally under `assets/restyle_cache/` and
+ignored by git.
 The Phase 0 SAM, Spark, and Muse Image smoke tests are run with
 `python backend/smoke_tests.py` from the project root after API access is
 configured. Phase 1 geometry and endpoint tests run without model API calls:

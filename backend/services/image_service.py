@@ -2,6 +2,7 @@ import base64
 import io
 import os
 import threading
+from collections import deque
 from urllib.request import urlopen
 
 from dotenv import load_dotenv
@@ -15,6 +16,58 @@ load_dotenv()
 MAX_IMAGES_PER_RUN = 3
 _image_counts: dict[str, int] = {}
 _IMAGE_COUNT_LOCK = threading.Lock()
+
+
+def _remove_corner_background(image: Image.Image) -> Image.Image:
+    rgba = image.convert("RGBA")
+    pixels = rgba.load()
+    width, height = rgba.size
+    corners = (
+        (0, 0),
+        (width - 1, 0),
+        (0, height - 1),
+        (width - 1, height - 1),
+    )
+    for background in ((0, 0, 0), (255, 255, 255)):
+        visited = bytearray(width * height)
+        pending = deque()
+        for x, y in corners:
+            red, green, blue, alpha = pixels[x, y]
+            close_to_background = max(
+                abs(red - background[0]),
+                abs(green - background[1]),
+                abs(blue - background[2]),
+            ) <= 48
+            index = y * width + x
+            if alpha and close_to_background and not visited[index]:
+                visited[index] = 1
+                pending.append((x, y))
+
+        while pending:
+            x, y = pending.popleft()
+            red, green, blue, alpha = pixels[x, y]
+            if alpha == 0:
+                continue
+            if max(
+                abs(red - background[0]),
+                abs(green - background[1]),
+                abs(blue - background[2]),
+            ) > 48:
+                continue
+            pixels[x, y] = (red, green, blue, 0)
+            for neighbor_x, neighbor_y in (
+                (x - 1, y),
+                (x + 1, y),
+                (x, y - 1),
+                (x, y + 1),
+            ):
+                if not (0 <= neighbor_x < width and 0 <= neighbor_y < height):
+                    continue
+                index = neighbor_y * width + neighbor_x
+                if not visited[index]:
+                    visited[index] = 1
+                    pending.append((neighbor_x, neighbor_y))
+    return rgba
 
 
 def reset_image_count(run_id: str | None = None) -> None:
@@ -36,19 +89,15 @@ def _png_bytes(response) -> bytes:
     else:
         raise ValueError("Muse Image returned no PNG data or downloadable URL")
 
-    if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-        try:
-            with Image.open(io.BytesIO(image_bytes)) as image:
-                png_buffer = io.BytesIO()
-                image.save(png_buffer, format="PNG")
-                image_bytes = png_buffer.getvalue()
-        except UnidentifiedImageError as error:
-            raise ValueError(
-                "Muse Image returned data that is not a decodable image"
-            ) from error
-    if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise ValueError("Muse Image data could not be converted to PNG")
-    return image_bytes
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            png_buffer = io.BytesIO()
+            _remove_corner_background(image).save(png_buffer, format="PNG")
+            return png_buffer.getvalue()
+    except (UnidentifiedImageError, OSError) as error:
+        raise ValueError(
+            "Muse Image returned data that is not a decodable image"
+        ) from error
 
 
 def restyle_object(
@@ -81,8 +130,8 @@ def restyle_object(
         max_retries=1,
     )
     prompt = (
-        f"A pixel art {label}, transparent background, clean silhouette, "
-        f"128x128, in {theme} style."
+        f"Redraw this {label} as a 2D platformer game asset in {theme} style, "
+        "isolated on a pure black background, no floor, no shadows."
     )
     response = client.images.generate(
         model="muse-image-1.0",

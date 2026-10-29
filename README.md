@@ -11,9 +11,12 @@ Room2Game explores real-to-simulation by extracting objects and their geometry
 from an ordinary desk or room photo, then mapping them into a small interactive
 world. `POST /generate` returns filtered object polygons, validated game rules,
 and resized canvas dimensions; the Phaser 3 frontend turns that response into a
-Matter.js platformer with keyboard and touch controls. Muse Image restyles
-objects asynchronously while the playable polygon fallbacks remain active.
-This can become a
+Matter.js platformer with keyboard and touch controls. A Phaser character sprite
+tracks its Matter body, while parallax scenery, dynamic shadows, and 2D lighting
+give the scene a 2.5D look. Use A/D or the arrow keys to move; Space, W, Up, or
+touch jumps. Muse Image restyles objects asynchronously, and edge-connected
+black or white backgrounds are removed before sprites are drawn. Playable
+polygon fallbacks remain active if restyling fails. This can become a
 lightweight source of varied scenes for robotics training and evaluation. The
 longer-term direction is interactive world models: agents should be able to
 inspect a real environment, reason about its objects, and act on a simulated

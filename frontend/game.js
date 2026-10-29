@@ -46,11 +46,22 @@
           centerX: (minX + maxX) / 2,
           topY: minY,
           centerY: (minY + Math.max(...ys)) / 2,
+          width: maxX - minX,
           area: Number(object.area_ratio) || Math.max(0, right - left) * Math.max(0, bottom - top),
         };
       })
       .filter(Boolean);
     if (!platforms.length) return start;
+
+    if (sceneData.meta?.rules_fallback) {
+      const widest = platforms.reduce((best, platform) => (
+        platform.width > best.width ? platform : best
+      ));
+      return {
+        x: Phaser.Math.Clamp(widest.centerX, 0, width),
+        y: Phaser.Math.Clamp(widest.topY - 50, 0, height),
+      };
+    }
 
     const nearest = platforms.reduce((best, platform) => (
       Math.hypot(platform.centerX - start.x, platform.centerY - start.y)
@@ -58,7 +69,7 @@
         ? platform
         : best
     ));
-    if (sceneData.meta?.rules_fallback || start.y < nearest.topY - 100) {
+    if (start.y < nearest.topY - 100) {
       const largest = platforms.reduce((best, platform) => (
         platform.area > best.area ? platform : best
       ));
@@ -140,6 +151,93 @@
     };
   }
 
+  function removeFlatBackground(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) {
+          reject(new Error("Could not prepare restyled sprite transparency."));
+          return;
+        }
+        context.drawImage(image, 0, 0);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const { data } = imageData;
+        const width = canvas.width;
+        const height = canvas.height;
+        const total = width * height;
+        const corners = [0, width - 1, (height - 1) * width, total - 1];
+        const backgrounds = new Set();
+        for (const index of corners) {
+          const offset = index * 4;
+          if (data[offset + 3] < 16) continue;
+          if (Math.max(data[offset], data[offset + 1], data[offset + 2]) <= 48) {
+            backgrounds.add(0);
+          } else if (Math.min(data[offset], data[offset + 1], data[offset + 2]) >= 207) {
+            backgrounds.add(255);
+          }
+        }
+        for (const background of backgrounds) {
+          const visited = new Uint8Array(total);
+          const stack = [];
+          for (const index of corners) {
+            const offset = index * 4;
+            const distance = Math.max(
+              Math.abs(data[offset] - background),
+              Math.abs(data[offset + 1] - background),
+              Math.abs(data[offset + 2] - background),
+            );
+            if (data[offset + 3] > 0 && distance <= 72 && !visited[index]) {
+              visited[index] = 1;
+              stack.push(index);
+            }
+          }
+          while (stack.length) {
+            const index = stack.pop();
+            const offset = index * 4;
+            const distance = Math.max(
+              Math.abs(data[offset] - background),
+              Math.abs(data[offset + 1] - background),
+              Math.abs(data[offset + 2] - background),
+            );
+            if (distance > 72) continue;
+            data[offset + 3] = Math.min(
+              data[offset + 3],
+              Math.round(255 * Math.max(0, (distance - 48) / 24)),
+            );
+            const x = index % width;
+            const y = Math.floor(index / width);
+            for (const next of [
+              x > 0 ? index - 1 : -1,
+              x + 1 < width ? index + 1 : -1,
+              y > 0 ? index - width : -1,
+              y + 1 < height ? index + width : -1,
+            ]) {
+              if (next < 0 || visited[next]) continue;
+              const nextOffset = next * 4;
+              const nextDistance = Math.max(
+                Math.abs(data[nextOffset] - background),
+                Math.abs(data[nextOffset + 1] - background),
+                Math.abs(data[nextOffset + 2] - background),
+              );
+              if (data[nextOffset + 3] > 0 && nextDistance <= 72) {
+                visited[next] = 1;
+                stack.push(next);
+              }
+            }
+          }
+        }
+        context.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      image.onerror = () => reject(new Error("Could not decode restyled sprite."));
+      image.src = dataUrl;
+    });
+  }
+
   function createGame(sceneData, assets) {
     if (typeof window.Phaser === "undefined") {
       throw new Error("Phaser could not be loaded. Check the connection and reload the page.");
@@ -163,10 +261,27 @@
         super({ key: "Room2GameScene" });
       }
 
+      preload() {
+        this.load.spritesheet(
+          "room2game-character",
+          "https://labs.phaser.io/assets/sprites/dude.png",
+          { frameWidth: 32, frameHeight: 48 },
+        );
+      }
+
       create() {
+        this.playerStart = savedPlayerStart;
         this.matter.world.setBounds(0, 0, width, height, 64, true, true, false, true);
         this.matter.world.setGravity(0, 1.05);
         this.cameras.main.setBackgroundColor("#171b14");
+        this.lights.enable().setAmbientColor(0x888888);
+        this.playerLight = this.lights.addLight(
+          this.playerStart?.x || width * 0.1,
+          this.playerStart?.y || height * 0.5,
+          Math.max(width, height) * 0.45,
+          0xffe6a3,
+          1.1,
+        );
 
         this.backgroundGraphics = this.add.graphics().setDepth(0);
         this.backgroundGraphics.fillGradientStyle(
@@ -185,11 +300,15 @@
         for (let y = gridGap; y < height; y += gridGap) {
           this.backgroundGraphics.lineBetween(0, y, width, y);
         }
+        this.parallaxGraphics = this.add.graphics().setDepth(0.5);
+        this.drawParallax(width * 0.1);
 
         this.levelGraphics = this.add.graphics().setDepth(2);
-        this.playerGraphics = this.add.graphics().setDepth(4);
+        this.shadowGraphics = this.add.graphics().setDepth(1);
+        this.playerGraphics = this.add.graphics().setDepth(5);
         this.spriteObjectIndices = new Set();
         this.spriteImages = new Map();
+        this.objectBodies = new Map();
         this.drawObjects(sceneData.objects, "platform");
         this.drawObjects(sceneData.objects, "hazard");
         this.drawObjects(sceneData.objects, "collectible");
@@ -203,7 +322,6 @@
         this.createRoleBodies(sceneData.rules.hazards, "hazard");
         this.createRoleBodies(sceneData.rules.collectibles, "collectible");
 
-        this.playerStart = savedPlayerStart;
         this.playerBody = this.matter.add.rectangle(
           this.playerStart.x,
           this.playerStart.y,
@@ -211,8 +329,8 @@
           Math.max(24, height * 0.06),
           {
             label: "room2game-player",
-            friction: 0.08,
-            frictionAir: 0.018,
+            friction: 0,
+            frictionAir: 0.01,
             restitution: 0,
             chamfer: { radius: 5 },
             collisionFilter: {
@@ -224,15 +342,42 @@
         this.playerBody.label = "room2game-player";
         this.playerStart.x = this.playerBody.position.x;
         this.playerStart.y = this.playerBody.position.y;
+        this.playerSprite = this.textures.exists("room2game-character")
+          ? this.add.sprite(
+            this.playerBody.position.x,
+            this.playerBody.position.y,
+            "room2game-character",
+            4,
+          ).setDepth(5).setPipeline("Light2D")
+          : null;
+        if (this.playerSprite) {
+          this.anims.create({
+            key: "room2game-walk-left",
+            frames: this.anims.generateFrameNumbers("room2game-character", {
+              start: 0,
+              end: 3,
+            }),
+            frameRate: 10,
+            repeat: -1,
+          });
+          this.anims.create({
+            key: "room2game-walk-right",
+            frames: this.anims.generateFrameNumbers("room2game-character", {
+              start: 5,
+              end: 8,
+            }),
+            frameRate: 10,
+            repeat: -1,
+          });
+          this.anims.create({
+            key: "room2game-idle",
+            frames: [{ key: "room2game-character", frame: 4 }],
+            frameRate: 1,
+            repeat: -1,
+          });
+        }
 
-        this.keys = this.input.keyboard.addKeys({
-          left: Phaser.Input.Keyboard.KeyCodes.LEFT,
-          right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
-          up: Phaser.Input.Keyboard.KeyCodes.UP,
-          a: Phaser.Input.Keyboard.KeyCodes.A,
-          d: Phaser.Input.Keyboard.KeyCodes.D,
-          space: Phaser.Input.Keyboard.KeyCodes.SPACE,
-        });
+        this.keys = this.input.keyboard.addKeys("W,A,S,D,SPACE,UP,LEFT,RIGHT");
         this.canJump = false;
         this.resetAfterHazard = false;
 
@@ -279,11 +424,27 @@
         for (const object of sceneData.objects) {
           const key = assetMap[object.object_index];
           if (!key || !this.textures.exists(key) || !Array.isArray(object.bbox)) continue;
-          const [left, top, right, bottom] = object.bbox;
-          this.add.image((left + right) / 2, (top + bottom) / 2, key)
+          const [left, , right, bottom] = object.bbox;
+          const sprite = this.add.image((left + right) / 2, (top + bottom) / 2, key)
             .setDisplaySize(Math.max(1, right - left), Math.max(1, bottom - top))
-            .setDepth(3);
+            .setOrigin(0.5)
+            .setDepth(3)
+            .setPipeline("Light2D");
+          this.trackObjectSprite(object.object_index, sprite);
         }
+      }
+
+      trackObjectSprite(objectIndex, sprite) {
+        const body = this.objectBodies.get(objectIndex);
+        if (body) {
+          this.spriteOffsets = this.spriteOffsets || new Map();
+          this.spriteOffsets.set(objectIndex, {
+            x: sprite.x - body.position.x,
+            y: sprite.y - body.position.y,
+          });
+        }
+        this.spriteImages.set(objectIndex, sprite);
+        this.spriteObjectIndices.add(objectIndex);
       }
 
       requestRestyledSprites() {
@@ -340,15 +501,14 @@
               (left + right) / 2,
               (top + bottom) / 2,
               textureKey,
-            );
+            ).setOrigin(0.5);
             const source = this.textures.get(textureKey).getSourceImage();
             const scale = Math.min(
               Math.max(1, right - left) / source.width,
               Math.max(1, bottom - top) / source.height,
             );
-            sprite.setScale(scale).setDepth(3);
-            this.spriteImages.set(objectIndex, sprite);
-            this.spriteObjectIndices.add(objectIndex);
+            sprite.setScale(scale).setDepth(3).setPipeline("Light2D");
+            this.trackObjectSprite(objectIndex, sprite);
             this.redrawLevel();
           };
 
@@ -380,10 +540,19 @@
             }, 5000);
             this.textures.on(Phaser.Textures.Events.LOAD, onTextureLoad);
             this.textures.on(Phaser.Textures.Events.ERROR, onTextureError);
-            this.textures.addBase64(
-              textureKey,
-              `data:image/png;base64,${payload.png_base64}`,
-            );
+            removeFlatBackground(`data:image/png;base64,${payload.png_base64}`)
+              .then((transparentDataUrl) => {
+                if (this.sys.isActive()) {
+                  this.textures.addBase64(textureKey, transparentDataUrl);
+                }
+              })
+              .catch((error) => {
+                clearTextureListeners();
+                console.warn(
+                  `Restyle transparency processing failed for object ${objectIndex}; keeping its polygon fallback.`,
+                  error,
+                );
+              });
           }
         } catch (error) {
           console.warn(
@@ -406,7 +575,7 @@
             [local],
             {
               label: `room2game-${role}-${entry.object_index}`,
-              isStatic: role === "platform",
+              isStatic: true,
               isSensor: role !== "platform",
               friction: role === "platform" ? 0.85 : 0,
               collisionFilter: {
@@ -417,6 +586,7 @@
             true,
           );
           body.label = `room2game-${role}-${entry.object_index}`;
+          this.objectBodies.set(entry.object_index, body);
           this.bodiesById.set(body.id, body);
           if (role === "platform") this.platformBodies.add(body.id);
           if (role === "hazard") this.hazardBodies.add(body.id);
@@ -507,6 +677,10 @@
         this.matter.body.setPosition(this.playerBody, this.playerStart);
         this.matter.body.setVelocity(this.playerBody, { x: 0, y: 0 });
         this.matter.body.setAngularVelocity(this.playerBody, 0);
+        if (this.playerSprite) {
+          this.playerSprite.setPosition(this.playerStart.x, this.playerStart.y);
+          this.playerSprite.play("room2game-idle", true);
+        }
         this.resetAfterHazard = false;
         this.canJump = false;
       }
@@ -533,26 +707,88 @@
         this.matter.world.off("collisionactive", this.handleActiveCollisions, this);
       }
 
+      drawParallax(playerX) {
+        const graphics = this.parallaxGraphics;
+        if (!graphics) return;
+        graphics.clear();
+        const offset = playerX * 0.12;
+        graphics.fillStyle(0x566149, 0.28);
+        graphics.fillPoints([
+          { x: -width - offset, y: height * 0.58 },
+          { x: -width * 0.2 - offset, y: height * 0.34 },
+          { x: width * 0.25 - offset, y: height * 0.56 },
+          { x: width * 0.68 - offset, y: height * 0.31 },
+          { x: width + offset, y: height * 0.57 },
+          { x: width + offset, y: height },
+          { x: -width - offset, y: height },
+        ], true);
+        graphics.fillPoints([
+          { x: -width + offset * 0.35, y: height * 0.73 },
+          { x: width * 0.1 + offset * 0.35, y: height * 0.55 },
+          { x: width * 0.45 + offset * 0.35, y: height * 0.74 },
+          { x: width * 0.82 + offset * 0.35, y: height * 0.52 },
+          { x: width + offset * 0.35, y: height * 0.7 },
+          { x: width + offset * 0.35, y: height },
+          { x: -width + offset * 0.35, y: height },
+        ], true);
+      }
+
+      drawShadows() {
+        this.shadowGraphics.clear();
+        for (const [objectIndex] of this.objectBodies) {
+          const object = sceneData.objects[objectIndex];
+          const [left, , right, bottom] = object.bbox;
+          const body = this.objectBodies.get(objectIndex);
+          if (collected.has(body.id)) continue;
+          const widthRatio = Math.max(0.2, Math.min(1, (right - left) / width));
+          this.shadowGraphics.fillStyle(0x070b06, 0.3);
+          this.shadowGraphics.fillEllipse(
+            body.position.x,
+            bottom - Math.max(1, height * 0.006),
+            Math.max(12, (right - left) * 0.82),
+            Math.max(5, height * 0.018 * widthRatio),
+          );
+        }
+        const player = this.playerBody;
+        const platformBelow = [...this.platformBodies]
+          .map((bodyId) => this.bodiesById.get(bodyId))
+          .filter((body) => body && body.position.y >= player.position.y)
+          .map((body) => ({
+            body,
+            distance: body.position.y - player.position.y,
+            top: Math.min(...body.vertices.map((vertex) => vertex.y)),
+          }))
+          .sort((a, b) => a.distance - b.distance)[0];
+        const fallDistance = platformBelow ? platformBelow.distance : height * 0.25;
+        const scale = Phaser.Math.Clamp(1 - fallDistance / (height * 0.7), 0.2, 1);
+        const shadowY = platformBelow
+          ? platformBelow.top + 4
+          : Math.min(height - 4, player.position.y + fallDistance);
+        this.shadowGraphics.fillStyle(0x050805, 0.34 * scale);
+        this.shadowGraphics.fillEllipse(
+          player.position.x,
+          shadowY,
+          Math.max(16, width * 0.055 * scale),
+          Math.max(5, height * 0.025 * scale),
+        );
+      }
+
       update() {
-        const moveLeft = this.keys.left.isDown || this.keys.a.isDown;
-        const moveRight = this.keys.right.isDown || this.keys.d.isDown;
+        const moveLeft = this.keys.LEFT.isDown || this.keys.A.isDown;
+        const moveRight = this.keys.RIGHT.isDown || this.keys.D.isDown;
         const direction = Number(moveRight) - Number(moveLeft);
         const maxSpeed = Math.max(3, width * 0.009);
-        if (direction !== 0) {
-          this.matter.body.setVelocity(this.playerBody, {
-            x: direction * maxSpeed,
-            y: this.playerBody.velocity.y,
-          });
-        } else if (Math.abs(this.playerBody.velocity.x) > 0.2) {
-          this.matter.body.setVelocity(this.playerBody, {
-            x: this.playerBody.velocity.x * 0.78,
-            y: this.playerBody.velocity.y,
-          });
-        }
+        this.matter.body.setVelocity(this.playerBody, {
+          x: direction === 0 && Math.abs(this.playerBody.velocity.x) <= 0.2
+            ? 0
+            : direction * maxSpeed || this.playerBody.velocity.x * 0.78,
+          y: this.playerBody.velocity.y,
+        });
 
         if (
-          Phaser.Input.Keyboard.JustDown(this.keys.space)
-          || Phaser.Input.Keyboard.JustDown(this.keys.up)
+          Phaser.Input.Keyboard.JustDown(this.keys.SPACE)
+          || Phaser.Input.Keyboard.JustDown(this.keys.UP)
+          || Phaser.Input.Keyboard.JustDown(this.keys.W)
         ) {
           this.jump();
         }
@@ -561,25 +797,41 @@
 
         const player = this.playerBody;
         this.playerGraphics.clear();
-        this.playerGraphics.fillStyle(0xd3f36b, 1);
-        this.playerGraphics.fillRoundedRect(
-          player.position.x - Math.max(9, width * 0.0125),
-          player.position.y - Math.max(12, height * 0.03),
-          Math.max(18, width * 0.025),
-          Math.max(24, height * 0.06),
-          Math.max(3, width * 0.006),
-        );
-        this.playerGraphics.fillStyle(0x252b1c, 1);
-        this.playerGraphics.fillCircle(
-          player.position.x + Math.max(3, width * 0.005),
-          player.position.y - Math.max(4, height * 0.009),
-          Math.max(1.5, width * 0.002),
-        );
+        if (this.playerSprite) {
+          this.playerSprite.setPosition(player.position.x, player.position.y);
+          if (direction < 0) this.playerSprite.play("room2game-walk-left", true);
+          else if (direction > 0) this.playerSprite.play("room2game-walk-right", true);
+          else this.playerSprite.play("room2game-idle", true);
+        } else {
+          this.playerGraphics.fillStyle(0x5d9c67, 1);
+          this.playerGraphics.fillRoundedRect(
+            player.position.x - Math.max(7, width * 0.01),
+            player.position.y - Math.max(10, height * 0.025),
+            Math.max(14, width * 0.02),
+            Math.max(20, height * 0.05),
+            Math.max(5, width * 0.006),
+          );
+          this.playerGraphics.fillStyle(0xe6b887, 1);
+          this.playerGraphics.fillCircle(
+            player.position.x,
+            player.position.y - Math.max(12, height * 0.028),
+            Math.max(6, width * 0.009),
+          );
+        }
+        for (const [objectIndex, sprite] of this.spriteImages) {
+          const body = this.objectBodies.get(objectIndex);
+          if (!body) continue;
+          const offset = this.spriteOffsets?.get(objectIndex) || { x: 0, y: 0 };
+          sprite.setPosition(body.position.x + offset.x, body.position.y + offset.y);
+        }
+        this.playerLight.setPosition(player.position.x, player.position.y);
+        this.drawParallax(player.position.x);
+        this.drawShadows();
       }
     }
 
     const game = new Phaser.Game({
-      type: Phaser.CANVAS,
+      type: Phaser.WEBGL,
       parent: gameRoot,
       width,
       height,
@@ -596,7 +848,7 @@
         matter: {
           gravity: { x: 0, y: 1.05 },
           debug: false,
-          enableSleeping: true,
+          enableSleeping: false,
         },
       },
       scene: [RoomScene],

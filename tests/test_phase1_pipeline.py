@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 
 import main
 from services import metrics_service
+from services.image_service import _remove_corner_background
 from services.polygon_service import mask_png_to_polygon
 from services.sam_service import _decoded_mask_png_base64
 
@@ -105,6 +106,18 @@ class SAMMaskTests(unittest.TestCase):
         self.assertIsNotNone(polygon)
         assert polygon is not None
         self.assertGreaterEqual(polygon["area_ratio"], 0.15)
+
+
+class MuseImageTransparencyTests(unittest.TestCase):
+    def test_removes_edge_connected_black_and_white_backgrounds(self):
+        for background in ("black", "white"):
+            image = Image.new("RGB", (20, 20), background)
+            ImageDraw.Draw(image).rectangle((5, 5, 14, 14), fill="red")
+
+            result = _remove_corner_background(image)
+
+            self.assertEqual(result.getpixel((0, 0))[3], 0)
+            self.assertEqual(result.getpixel((10, 10))[3], 255)
 
 
 class GenerateEndpointTests(unittest.TestCase):
@@ -294,7 +307,7 @@ class GenerateEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(
             response.json()["rules"]["player_start"],
-            {"x": 128.0, "y": 360.0},
+            {"x": 640.0, "y": 598.0},
         )
 
     def test_upstream_segmentation_failure_returns_visible_fallback_scene(self):
@@ -313,7 +326,7 @@ class GenerateEndpointTests(unittest.TestCase):
         self.assertEqual(payload["objects"][0]["label"], "ground")
         self.assertEqual(
             payload["rules"]["player_start"],
-            {"x": 128.0, "y": 360.0},
+            {"x": 640.0, "y": 598.0},
         )
 
     def test_zero_sam_objects_are_reported_and_start_above_ground(self):
@@ -330,8 +343,24 @@ class GenerateEndpointTests(unittest.TestCase):
             "Zero objects returned from API",
         )
         self.assertEqual([obj["label"] for obj in payload["objects"]], ["ground"])
-        self.assertEqual(payload["rules"]["player_start"], {"x": 128.0, "y": 360.0})
+        self.assertEqual(payload["rules"]["player_start"], {"x": 640.0, "y": 598.0})
         spark_mock.assert_not_called()
+
+    def test_fallback_player_starts_above_widest_platform(self):
+        objects = [
+            {"bbox": [20.0, 200.0, 180.0, 250.0]},
+            {"bbox": [100.0, 400.0, 700.0, 600.0]},
+        ]
+        rules = {
+            "platforms": [
+                {"object_index": 0, "role": "solid"},
+                {"object_index": 1, "role": "solid"},
+            ]
+        }
+
+        main._fallback_player_start(objects, rules, 800, 700)
+
+        self.assertEqual(rules["player_start"], {"x": 400.0, "y": 350.0})
 
     def test_fallback_roles_follow_area_and_plant_rules(self):
         objects = [

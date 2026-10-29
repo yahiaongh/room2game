@@ -335,6 +335,25 @@ def _inject_ground(objects: list[dict], rules: dict, width: int, height: int) ->
     )
 
 
+def _fallback_player_start(
+    objects: list[dict], rules: dict, width: int, height: int
+) -> None:
+    platforms = [
+        objects[entry["object_index"]]
+        for entry in rules["platforms"]
+        if 0 <= entry["object_index"] < len(objects)
+    ]
+    widest = max(
+        platforms,
+        key=lambda obj: float(obj["bbox"][2]) - float(obj["bbox"][0]),
+    )
+    left, top, right, _ = (float(value) for value in widest["bbox"])
+    rules["player_start"] = {
+        "x": float(min(width, max(0.0, (left + right) / 2))),
+        "y": float(min(height, max(0.0, top - 50.0))),
+    }
+
+
 @app.post("/generate")
 def generate(
     image: UploadFile = File(...),
@@ -474,6 +493,8 @@ def generate(
         _inject_ground(objects, rules, canvas_width, canvas_height)
         if not rules["platforms"]:
             raise RuntimeError("Scene generation failed to produce a ground platform")
+        if rules_fallback:
+            _fallback_player_start(objects, rules, canvas_width, canvas_height)
         _persist_scene_source(image_id, image_bytes, objects)
 
         response_data = {

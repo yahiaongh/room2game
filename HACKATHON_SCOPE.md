@@ -16,20 +16,25 @@ were supplied by the user and are not claimed as original implementation work.
 | `HACKATHON_RULES_AND_INFO.md` | User-provided track and submission reference; not original application work. |
 | `assets/desk_smoke_test.jpeg` | User-provided photo for API smoke tests; not original application work. |
 | `assets/sam_raw_sample.txt` | Hackathon-generated: raw first successful SAM 3.1 output for grammar inspection; created when segmentation succeeds. |
-| `backend/main.py` | Hackathon work: FastAPI app, demo CORS, and health check. |
+| `backend/main.py` | Hackathon work: FastAPI app, demo CORS, health check, and Phase 1 multipart photo-to-scene pipeline. |
 | `backend/models/__init__.py` | Hackathon work: Python package marker. |
 | `backend/models/schemas.py` | Hackathon work: strict structured game-rules schema. |
-| `backend/requirements.txt` | Hackathon work: backend and official SAM parser dependencies. |
+| `backend/requirements.txt` | Hackathon work: backend, official SAM parser, and headless OpenCV dependencies. |
 | `backend/services/__init__.py` | Hackathon work: Python package marker. |
 | `backend/services/image_service.py` | Hackathon work: Muse Image generation, PNG decoding, and per-run image cap. |
 | `backend/services/metrics_service.py` | Hackathon work: atomic writes for generated demo metrics. |
+| `backend/services/polygon_service.py` | Hackathon work: mask thresholding, contour simplification, and bounded physics polygons. |
 | `backend/services/sam_service.py` | Hackathon work: concept-limited SAM 3.1 requests and official grammar/mask parsing. |
 | `backend/services/spark_service.py` | Hackathon work: Meta-first Muse Spark rules, Baseten fallback, strict schema validation, and provider metrics. |
 | `backend/smoke_tests.py` | Hackathon work: ordered live smoke-test runner for SAM, Meta Spark, Baseten Spark, Muse Image, and health. |
 | `frontend/assets/.gitkeep` | Hackathon work: preserves the future static frontend asset directory. |
 | `scripts/update_readme_metrics.py` | Hackathon work: Phase 5 helper that prints real demo metrics into the README. |
+| `tests/test_phase1_pipeline.py` | Hackathon work: standard-library tests for polygon filtering and the mocked `/generate` endpoint. |
 | `demo_metrics.json` | Generated and ignored: per-run API counts and Spark usage; not committed. |
 | `.env` | Local-only and ignored: contains credentials; not committed or described here. |
 
 No local ML model, PyTorch dependency, GPU requirement, or non-available
-Fireworks/Modal credit is used or claimed.
+Fireworks/Modal credit is used or claimed. Phase 1 adds backend segmentation,
+polygon extraction, role validation, deterministic rules fallback, and an
+injected ground platform; it does not add a frontend, Phaser, Matter.js,
+database, authentication, or UI.

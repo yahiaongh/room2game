@@ -9,7 +9,9 @@ training, with the game as the demo surface.
 
 Room2Game explores real-to-simulation by extracting objects and their geometry
 from an ordinary desk or room photo, then mapping them into a small interactive
-world. This can become a lightweight source of varied scenes for robotics
+world. `POST /generate` currently returns filtered object polygons, validated
+game rules, and the resized canvas dimensions. This can become a lightweight
+source of varied scenes for robotics
 training and evaluation. The longer-term direction is interactive world models:
 agents should be able to inspect a real environment, reason about its objects,
 and act on a simulated version. The playable platformer is the demo surface for
@@ -17,15 +19,18 @@ that pipeline, not the end goal.
 
 ## Which Meta models are used and how
 
-**SAM 3.1** segments one requested room object concept per API call. The
-`meta-sam-parser` package decodes SAM's special-token output into masks and
-bounding boxes; this project does not run local ML models.
+**SAM 3.1** segments one requested room object concept per API call, with at
+most five concepts requested per image. The `meta-sam-parser` package decodes
+SAM's special-token output into masks and bounding boxes; OpenCV extracts
+simplified display and convex physics polygons. This project does not run local
+ML models.
 
 **Muse Spark 1.3 / Muse Spark Open** assigns game roles to detected objects and
 returns schema-validated JSON rules. The Meta Model API is tried first;
 timeouts and connection failures can fall back to Baseten's exact open model
 identifier, `meta-models/muse-spark-open-1026`. `FORCE_BASETEN=1` exercises the
-partner endpoint directly.
+partner endpoint directly. If generated rules are invalid or the request times
+out, `/generate` builds safe deterministic fallback rules.
 
 **Muse Image** generates a pixel-art asset for an object label through the Meta
 Images API. A per-run cap of three images limits generation cost.
@@ -49,8 +54,9 @@ provided before this implementation and are not claimed as original work.
 
 Phase 4 is intended to add a pre-generated demo scene so judges can try the
 experience when APIs or Wi-Fi are unavailable. That frontend fallback is not
-implemented in Phase 0. For now, the backend health endpoint can be checked
-without calling a model API; live generation requires the configured API keys.
+implemented in Phase 1. The `/generate` endpoint can return fallback rules if
+Spark rules are invalid or time out, but image generation still requires SAM.
+The backend health endpoint can be checked without calling a model API.
 
 ## Setup
 
@@ -66,9 +72,16 @@ cd backend
 uvicorn main:app --reload
 ```
 
-`GET http://localhost:8000/health` is the Phase 0 health check. SAM, Spark, and
-Muse Image smoke tests are run with `python backend/smoke_tests.py` from the
-project root after API access is configured.
+`GET http://localhost:8000/health` is the health check. Upload a photo as the
+`image` multipart field to `POST http://localhost:8000/generate`; optionally set
+the `theme` query parameter. Response coordinates use the resized canvas space.
+The Phase 0 SAM, Spark, and Muse Image smoke tests are run with
+`python backend/smoke_tests.py` from the project root after API access is
+configured. Phase 1 geometry and endpoint tests run without model API calls:
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ## Demo metrics
 

@@ -6,3 +6,4 @@ pillow
 python-dotenv
 numpy
 meta-sam-parser
+opencv-python-headless

@@ -45,3 +45,12 @@ def record_spark_call(call: dict[str, Any]) -> None:
 
 def record_muse_image_count(count: int) -> None:
     _update_metrics(lambda metrics: metrics.update(muse_image_count=count))
+
+
+def record_fallback(reason: str) -> None:
+    def update(metrics):
+        metrics.setdefault("scene_fallbacks", []).append(
+            {"provider": "fallback", "reason": reason}
+        )
+
+    _update_metrics(update)

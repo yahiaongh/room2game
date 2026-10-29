@@ -63,6 +63,14 @@ def _canvas_image(image_bytes: bytes) -> tuple[bytes, int, int]:
     return canvas_buffer.getvalue(), canvas_width, canvas_height
 
 
+def _canvas_jpeg_data_url(image_bytes: bytes) -> str:
+    with Image.open(io.BytesIO(image_bytes)) as canvas_image:
+        jpeg_buffer = io.BytesIO()
+        canvas_image.convert("RGB").save(jpeg_buffer, format="JPEG", quality=90)
+    encoded = base64.b64encode(jpeg_buffer.getvalue()).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
 def _persist_scene_source(
     image_id: str, image_bytes: bytes, objects: list[dict]
 ) -> None:
@@ -501,6 +509,7 @@ def generate(
             "objects": objects,
             "rules": rules,
             "canvas": {"width": canvas_width, "height": canvas_height},
+            "canvas_base64": _canvas_jpeg_data_url(image_bytes),
             "image_id": image_id,
             "meta": {
                 "debug_sam_status": debug_sam_status,

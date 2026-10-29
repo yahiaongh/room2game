@@ -7,18 +7,11 @@
     hazard: 0x0004,
     collectible: 0x0008,
   };
-  const ROLE_COLORS = {
-    platform: 0x83a766,
-    hazard: 0xe8755e,
-    collectible: 0xe7c85f,
+  const HOLOGRAM_COLORS = {
+    platform: 0x00ffcc,
+    hazard: 0xff3333,
+    collectible: 0xffd700,
   };
-  const PLATFORM_COLORS = [
-    0x80a56a,
-    0x7993a2,
-    0xb38b66,
-    0x8d80a7,
-    0x9ca45f,
-  ];
 
   function choosePlayerStart(sceneData) {
     const width = sceneData.canvas.width;
@@ -262,6 +255,9 @@
       }
 
       preload() {
+        if (sceneData.canvas_base64) {
+          this.load.image("scene-photo-background", sceneData.canvas_base64);
+        }
         this.load.spritesheet(
           "room2game-character",
           "https://labs.phaser.io/assets/sprites/dude.png",
@@ -282,31 +278,17 @@
           0xffe6a3,
           1.1,
         );
-
-        this.backgroundGraphics = this.add.graphics().setDepth(0);
-        this.backgroundGraphics.fillGradientStyle(
-          0x293324,
-          0x293324,
-          0x171b14,
-          0x171b14,
-          1,
-        );
-        this.backgroundGraphics.fillRect(0, 0, width, height);
-        this.backgroundGraphics.lineStyle(1, 0xc3d79a, 0.045);
-        const gridGap = Math.max(32, Math.round(Math.min(width, height) / 12));
-        for (let x = gridGap; x < width; x += gridGap) {
-          this.backgroundGraphics.lineBetween(x, 0, x, height);
+        if (this.textures.exists("scene-photo-background")) {
+          this.add.image(0, 0, "scene-photo-background")
+            .setOrigin(0, 0)
+            .setDepth(-1)
+            .setDisplaySize(width, height);
         }
-        for (let y = gridGap; y < height; y += gridGap) {
-          this.backgroundGraphics.lineBetween(0, y, width, y);
-        }
-        this.parallaxGraphics = this.add.graphics().setDepth(0.5);
-        this.drawParallax(width * 0.1);
 
         this.levelGraphics = this.add.graphics().setDepth(2);
         this.shadowGraphics = this.add.graphics().setDepth(1);
         this.playerGraphics = this.add.graphics().setDepth(5);
-        this.spriteObjectIndices = new Set();
+        this.playerAuraGraphics = this.add.graphics().setDepth(4);
         this.spriteImages = new Map();
         this.objectBodies = new Map();
         this.drawObjects(sceneData.objects, "platform");
@@ -398,25 +380,17 @@
 
       drawObjects(objects, role) {
         const roleEntries = sceneData.rules[`${role}s`];
-        roleEntries.forEach((entry, order) => {
+        roleEntries.forEach((entry) => {
           const object = objects[entry.object_index];
-          if (this.spriteObjectIndices.has(entry.object_index)) return;
           const points = object.display;
           if (!Array.isArray(points) || points.length < 3) return;
-          const color = role === "platform"
-            ? PLATFORM_COLORS[order % PLATFORM_COLORS.length]
-            : ROLE_COLORS[role];
-          this.levelGraphics.fillStyle(color, role === "platform" ? 0.94 : 0.9);
-          this.levelGraphics.lineStyle(2, 0xf0f1e8, 0.22);
+          const color = HOLOGRAM_COLORS[role];
+          this.levelGraphics.fillStyle(color, 0.12);
           this.levelGraphics.fillPoints(points, true);
+          this.levelGraphics.lineStyle(12, color, 0.14);
           this.levelGraphics.strokePoints(points, true);
-          if (role === "platform") {
-            this.levelGraphics.lineStyle(Math.max(2, height * 0.008), 0xe0efc3, 0.33);
-            this.levelGraphics.beginPath();
-            this.levelGraphics.moveTo(points[0].x, points[0].y);
-            this.levelGraphics.lineTo(points[1].x, points[1].y);
-            this.levelGraphics.strokePath();
-          }
+          this.levelGraphics.lineStyle(4, color, 0.9);
+          this.levelGraphics.strokePoints(points, true);
         });
       }
 
@@ -424,11 +398,11 @@
         for (const object of sceneData.objects) {
           const key = assetMap[object.object_index];
           if (!key || !this.textures.exists(key) || !Array.isArray(object.bbox)) continue;
-          const [left, , right, bottom] = object.bbox;
+          const [left, top, right, bottom] = object.bbox;
           const sprite = this.add.image((left + right) / 2, (top + bottom) / 2, key)
-            .setDisplaySize(Math.max(1, right - left), Math.max(1, bottom - top))
             .setOrigin(0.5)
-            .setDepth(3)
+            .setDisplaySize(Math.max(1, right - left), Math.max(1, bottom - top))
+            .setDepth(1.5)
             .setPipeline("Light2D");
           this.trackObjectSprite(object.object_index, sprite);
         }
@@ -444,7 +418,6 @@
           });
         }
         this.spriteImages.set(objectIndex, sprite);
-        this.spriteObjectIndices.add(objectIndex);
       }
 
       requestRestyledSprites() {
@@ -502,12 +475,10 @@
               (top + bottom) / 2,
               textureKey,
             ).setOrigin(0.5);
-            const source = this.textures.get(textureKey).getSourceImage();
-            const scale = Math.min(
-              Math.max(1, right - left) / source.width,
-              Math.max(1, bottom - top) / source.height,
-            );
-            sprite.setScale(scale).setDepth(3).setPipeline("Light2D");
+            sprite.setDisplaySize(
+              Math.max(1, right - left),
+              Math.max(1, bottom - top),
+            ).setDepth(1.5).setPipeline("Light2D");
             this.trackObjectSprite(objectIndex, sprite);
             this.redrawLevel();
           };
@@ -645,7 +616,7 @@
         );
         const entries = sceneData.rules.collectibles;
         const keepEntries = entries.filter((entry) => !collectedIndices.has(entry.object_index));
-        this.drawObjectsForList(keepEntries, ROLE_COLORS.collectible);
+        this.drawObjectsForList(keepEntries, HOLOGRAM_COLORS.collectible);
       }
 
       drawCollectedState() {
@@ -654,12 +625,13 @@
 
       drawObjectsForList(entries, color) {
         for (const entry of entries) {
-          if (this.spriteObjectIndices.has(entry.object_index)) continue;
           const object = sceneData.objects[entry.object_index];
           if (!object || !Array.isArray(object.display)) continue;
-          this.levelGraphics.fillStyle(color, 0.9);
-          this.levelGraphics.lineStyle(2, 0xf0f1e8, 0.22);
+          this.levelGraphics.fillStyle(color, 0.12);
           this.levelGraphics.fillPoints(object.display, true);
+          this.levelGraphics.lineStyle(12, color, 0.14);
+          this.levelGraphics.strokePoints(object.display, true);
+          this.levelGraphics.lineStyle(4, color, 0.9);
           this.levelGraphics.strokePoints(object.display, true);
         }
       }
@@ -707,48 +679,8 @@
         this.matter.world.off("collisionactive", this.handleActiveCollisions, this);
       }
 
-      drawParallax(playerX) {
-        const graphics = this.parallaxGraphics;
-        if (!graphics) return;
-        graphics.clear();
-        const offset = playerX * 0.12;
-        graphics.fillStyle(0x566149, 0.28);
-        graphics.fillPoints([
-          { x: -width - offset, y: height * 0.58 },
-          { x: -width * 0.2 - offset, y: height * 0.34 },
-          { x: width * 0.25 - offset, y: height * 0.56 },
-          { x: width * 0.68 - offset, y: height * 0.31 },
-          { x: width + offset, y: height * 0.57 },
-          { x: width + offset, y: height },
-          { x: -width - offset, y: height },
-        ], true);
-        graphics.fillPoints([
-          { x: -width + offset * 0.35, y: height * 0.73 },
-          { x: width * 0.1 + offset * 0.35, y: height * 0.55 },
-          { x: width * 0.45 + offset * 0.35, y: height * 0.74 },
-          { x: width * 0.82 + offset * 0.35, y: height * 0.52 },
-          { x: width + offset * 0.35, y: height * 0.7 },
-          { x: width + offset * 0.35, y: height },
-          { x: -width + offset * 0.35, y: height },
-        ], true);
-      }
-
       drawShadows() {
         this.shadowGraphics.clear();
-        for (const [objectIndex] of this.objectBodies) {
-          const object = sceneData.objects[objectIndex];
-          const [left, , right, bottom] = object.bbox;
-          const body = this.objectBodies.get(objectIndex);
-          if (collected.has(body.id)) continue;
-          const widthRatio = Math.max(0.2, Math.min(1, (right - left) / width));
-          this.shadowGraphics.fillStyle(0x070b06, 0.3);
-          this.shadowGraphics.fillEllipse(
-            body.position.x,
-            bottom - Math.max(1, height * 0.006),
-            Math.max(12, (right - left) * 0.82),
-            Math.max(5, height * 0.018 * widthRatio),
-          );
-        }
         const player = this.playerBody;
         const platformBelow = [...this.platformBodies]
           .map((bodyId) => this.bodiesById.get(bodyId))
@@ -797,6 +729,19 @@
 
         const player = this.playerBody;
         this.playerGraphics.clear();
+        this.playerAuraGraphics.clear();
+        this.playerAuraGraphics.fillStyle(0x00ffcc, 0.15);
+        this.playerAuraGraphics.fillCircle(
+          player.position.x,
+          player.position.y,
+          Math.max(22, width * 0.035),
+        );
+        this.playerAuraGraphics.lineStyle(2, 0x6ffff0, 0.9);
+        this.playerAuraGraphics.strokeCircle(
+          player.position.x,
+          player.position.y,
+          Math.max(16, width * 0.026),
+        );
         if (this.playerSprite) {
           this.playerSprite.setPosition(player.position.x, player.position.y);
           if (direction < 0) this.playerSprite.play("room2game-walk-left", true);
@@ -825,7 +770,6 @@
           sprite.setPosition(body.position.x + offset.x, body.position.y + offset.y);
         }
         this.playerLight.setPosition(player.position.x, player.position.y);
-        this.drawParallax(player.position.x);
         this.drawShadows();
       }
     }

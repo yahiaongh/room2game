@@ -130,8 +130,8 @@ def restyle_object(
         max_retries=1,
     )
     prompt = (
-        f"Redraw this {label} as a 2D platformer game asset in {theme} style, "
-        "isolated on a pure black background, no floor, no shadows."
+        f"Redraw this {label} as a glowing neon holographic game asset in "
+        f"{theme} style, transparent background, 128x128."
     )
     response = client.images.generate(
         model="muse-image-1.0",

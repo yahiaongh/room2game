@@ -52,7 +52,7 @@ def mask_png_to_polygon(
     if area_ratio < MIN_AREA_RATIO:
         return None
 
-    epsilon = 0.01 * cv2.arcLength(largest, True)
+    epsilon = 0.005 * cv2.arcLength(largest, True)
     display = cv2.approxPolyDP(largest, epsilon, True)
     retries = 0
     while (

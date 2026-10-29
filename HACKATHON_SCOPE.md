@@ -29,7 +29,7 @@ work.
 | `backend/services/spark_service.py` | Hackathon work: Meta-first Muse Spark rules, Baseten fallback, strict schema validation, and provider metrics. |
 | `backend/smoke_tests.py` | Hackathon work: ordered live smoke-test runner for SAM, Meta Spark, Baseten Spark, Muse Image, and health. |
 | `frontend/assets/.gitkeep` | Hackathon work: preserves the future static frontend asset directory. |
-| `frontend/game.js` | Hackathon work: Phaser 3/Matter.js runtime with an animated character, keyboard/touch controls, non-sleeping movement, synchronized restyled sprites, background cutout, parallax, shadows, lighting, scoring, hazard resets, and replay. |
+| `frontend/game.js` | Hackathon work: Phaser 3/Matter.js runtime with the source photo background, holographic role-colored polygon overlays, invisible physics bodies, animated character aura, optional aligned restyled sprites, keyboard/touch controls, scoring, hazard resets, and replay. |
 | `frontend/index.html` | Hackathon work: responsive static photo-upload interface, theme selector, game canvas, status, score, and Phaser CDN loading. |
 | `scripts/update_readme_metrics.py` | Hackathon work: Phase 5 helper that prints real demo metrics into the README. |
 | `tests/test_phase1_pipeline.py` | Hackathon work: standard-library tests for polygon filtering and the mocked `/generate` endpoint. |

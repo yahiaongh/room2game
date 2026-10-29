@@ -91,6 +91,19 @@ class PolygonServiceTests(unittest.TestCase):
         self.assertTrue(cv2.isContourConvex(physics))
         self.assertGreater(len(display), len(physics))
 
+    def test_curved_display_outline_keeps_higher_fidelity_vertices(self):
+        image = Image.new("L", (200, 200), 0)
+        ImageDraw.Draw(image).ellipse((20, 20, 180, 180), fill=255)
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+
+        polygon = mask_png_to_polygon(output.getvalue(), 200, 200)
+
+        self.assertIsNotNone(polygon)
+        assert polygon is not None
+        self.assertGreaterEqual(len(polygon["display"]), 8)
+        self.assertLessEqual(len(polygon["display"]), 32)
+
 
 class SAMMaskTests(unittest.TestCase):
     def test_scales_parser_binary_mask_values_for_polygon_threshold(self):
@@ -175,9 +188,17 @@ class GenerateEndpointTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(
             set(payload),
-            {"objects", "rules", "canvas", "image_id", "meta"},
+            {"objects", "rules", "canvas", "canvas_base64", "image_id", "meta"},
         )
         self.assertRegex(payload["image_id"], r"^[a-f0-9]{64}$")
+        background_prefix = "data:image/jpeg;base64,"
+        self.assertTrue(payload["canvas_base64"].startswith(background_prefix))
+        background_bytes = base64.b64decode(
+            payload["canvas_base64"][len(background_prefix):]
+        )
+        with Image.open(io.BytesIO(background_bytes)) as background:
+            self.assertEqual(background.format, "JPEG")
+            self.assertEqual(background.size, (1280, 720))
         self.assertEqual(
             payload["meta"]["debug_sam_status"],
             "SAM returned 1 masks; 1 objects retained",

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10120f">
+    <title>Room2Game — playable worlds from real rooms</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #10120f;
+        color: #f0f1e8;
+        font-synthesis: none;
+        --muted: #9da391;
+        --lime: #d3f36b;
+        --panel: #191c17;
+        --line: #30362a;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        min-width: 320px;
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(ellipse at 82% 0%, rgb(111 132 58 / 13%), transparent 34rem),
+          #10120f;
+      }
+
+      button, input, select { font: inherit; }
+      button { cursor: pointer; }
+
+      .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 76px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand { display: flex; align-items: center; gap: 11px; font-size: 15px; font-weight: 720; letter-spacing: -.03em; }
+      .brand-mark { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; background: var(--lime); color: #171a10; font-size: 17px; }
+      .header-tag { color: var(--muted); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+
+      main { padding: 48px 0 56px; }
+
+      .intro { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 30px; }
+      .eyebrow { margin: 0 0 12px; color: var(--lime); font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+      h1 { max-width: 650px; margin: 0; font-size: clamp(32px, 5vw, 54px); font-weight: 650; letter-spacing: -.055em; line-height: 1.04; }
+      .intro-copy { max-width: 275px; margin: 0 0 4px; color: var(--muted); font-size: 14px; line-height: 1.65; }
+
+      .workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+      .panel { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+      .controls { padding: 20px; }
+      .section-label { margin: 0 0 14px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; }
+
+      .dropzone {
+        position: relative;
+        display: grid;
+        min-height: 158px;
+        overflow: hidden;
+        place-items: center;
+        border: 1px dashed #596147;
+        border-radius: 11px;
+        background: #131610;
+        text-align: center;
+      }
+
+      .dropzone input { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; cursor: pointer; opacity: 0; }
+      .dropzone-content { z-index: 1; padding: 18px; pointer-events: none; }
+      .upload-icon { display: grid; width: 36px; height: 36px; margin: 0 auto 10px; place-items: center; border: 1px solid #444b38; border-radius: 10px; color: var(--lime); font-size: 19px; }
+      .upload-title { margin: 0 0 5px; font-size: 13px; font-weight: 650; }
+      .upload-hint { margin: 0; color: var(--muted); font-size: 11px; }
+      .dropzone.has-image { border-style: solid; }
+      .dropzone.has-image img { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: .56; }
+      .dropzone.has-image .dropzone-content { padding: 8px 12px; border-radius: 8px; background: rgb(16 18 15 / 82%); }
+      .dropzone.has-image .upload-icon { display: none; }
+
+      .field-label { display: block; margin: 18px 0 7px; color: var(--muted); font-size: 12px; }
+      select {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        outline: none;
+        background: #12150f;
+        color: #eff0e8;
+      }
+
+      select:focus-visible, button:focus-visible, input:focus-visible + .dropzone-content { outline: 2px solid var(--lime); outline-offset: 3px; }
+      .primary, .secondary { width: 100%; min-height: 42px; margin-top: 12px; border-radius: 9px; font-size: 13px; font-weight: 680; transition: background .16s ease, transform .16s ease; }
+      .primary { border: 0; background: var(--lime); color: #191c12; }
+      .primary:hover:not(:disabled) { transform: translateY(-1px); background: #e0ff83; }
+      .primary:disabled { cursor: not-allowed; opacity: .48; }
+      .secondary { border: 1px solid #414837; background: transparent; color: #e6e9dc; }
+      .secondary:hover:not(:disabled) { background: #24291f; }
+      .secondary:disabled { cursor: not-allowed; opacity: .45; }
+      .status { min-height: 37px; margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .status[data-state="error"] { color: #ff9a87; }
+      .status[data-state="success"] { color: var(--lime); }
+
+      .game-panel { min-width: 0; padding: 14px; }
+      .game-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 1px 2px 12px; }
+      .game-heading { margin: 0; font-size: 13px; font-weight: 650; }
+      .game-meta { color: var(--muted); font-size: 11px; text-align: right; }
+      #game {
+        display: grid;
+        min-height: 250px;
+        overflow: hidden;
+        place-items: center;
+        border: 1px solid #363d30;
+        border-radius: 11px;
+        background: #171b14;
+      }
+
+      #game canvas { display: block; max-width: 100%; height: auto; touch-action: none; }
+      .game-placeholder { max-width: 300px; padding: 30px 20px; color: var(--muted); font-size: 13px; line-height: 1.65; text-align: center; }
+      .game-placeholder strong { display: block; margin-bottom: 5px; color: #e5e9d8; font-size: 14px; }
+      .game-footer { display: flex; justify-content: space-between; gap: 12px; padding: 12px 3px 1px; color: var(--muted); font-size: 11px; }
+      .score { color: var(--lime); font-variant-numeric: tabular-nums; }
+      .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 15px; color: var(--muted); font-size: 11px; }
+      .legend span { display: inline-flex; align-items: center; gap: 6px; }
+      .swatch { width: 8px; height: 8px; border-radius: 3px; background: #8eb96d; }
+      .swatch.hazard { background: #e77a61; }
+      .swatch.collectible { background: #e8ca65; }
+      .keyboard-hint { color: #a7ad9a; }
+
+      @media (max-width: 760px) {
+        .shell { width: min(100% - 26px, 560px); }
+        header { min-height: 64px; }
+        main { padding-top: 34px; }
+        .intro { display: block; }
+        .intro-copy { margin-top: 14px; }
+        .workspace { grid-template-columns: 1fr; }
+        .controls { order: 0; }
+        .game-panel { order: 1; padding: 10px; }
+        .game-footer { font-size: 10px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="shell">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">R</span>Room2Game</div>
+      <div class="header-tag">Real rooms · playable worlds</div>
+    </header>
+
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">From photo to simulation</p>
+          <h1 id="page-title">Your room is a world waiting to be played.</h1>
+        </div>
+        <p class="intro-copy">Turn the objects around you into platforms, hazards, and things to collect.</p>
+      </section>
+
+      <section class="workspace" aria-label="Room2Game photo-to-platformer demo">
+        <aside class="panel controls">
+          <p class="section-label">Build a scene</p>
+          <div class="dropzone" id="dropzone">
+            <input id="photo-input" type="file" accept="image/*" aria-label="Choose a room or desk photo">
+            <img id="photo-preview" alt="" hidden>
+            <div class="dropzone-content">
+              <span class="upload-icon" aria-hidden="true">↑</span>
+              <p class="upload-title" id="upload-title">Choose a room photo</p>
+              <p class="upload-hint" id="upload-hint">JPG or PNG · click or drop a file</p>
+            </div>
+          </div>
+
+          <label class="field-label" for="theme">World style</label>
+          <select id="theme">
+            <option value="pixel art">Pixel art</option>
+            <option value="storybook">Storybook</option>
+            <option value="retro arcade">Retro arcade</option>
+          </select>
+
+          <button class="primary" id="generate-button" type="button" disabled>Generate game</button>
+          <button class="secondary" id="play-again-button" type="button" disabled>Play again</button>
+          <p class="status" id="status" role="status" aria-live="polite">Upload a photo to create a playable scene.</p>
+        </aside>
+
+        <section class="panel game-panel" aria-label="Generated platformer">
+          <div class="game-topline">
+            <h2 class="game-heading">Your playable scene</h2>
+            <span class="game-meta" id="game-meta">Waiting for a photo</span>
+          </div>
+          <div id="game">
+            <div class="game-placeholder" id="game-placeholder">
+              <strong>Nothing here yet</strong>
+              Your room's objects will become the level. Move with A/D or ←/→, jump with Space or ↑.
+            </div>
+          </div>
+          <div class="game-footer">
+            <span id="win-condition">Upload a photo to begin.</span>
+            <span class="score" id="score" aria-live="polite">0 points</span>
+          </div>
+          <div class="legend" aria-label="Scene legend">
+            <span><i class="swatch" aria-hidden="true"></i>Platforms</span>
+            <span><i class="swatch hazard" aria-hidden="true"></i>Hazards</span>
+            <span><i class="swatch collectible" aria-hidden="true"></i>Collectibles</span>
+            <span class="keyboard-hint">Touch: tap to jump</span>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js" crossorigin="anonymous"></script>
+    <script src="./game.js"></script>
+  </body>
+</html>

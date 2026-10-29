@@ -9,13 +9,14 @@ training, with the game as the demo surface.
 
 Room2Game explores real-to-simulation by extracting objects and their geometry
 from an ordinary desk or room photo, then mapping them into a small interactive
-world. `POST /generate` currently returns filtered object polygons, validated
-game rules, and the resized canvas dimensions. This can become a lightweight
-source of varied scenes for robotics
-training and evaluation. The longer-term direction is interactive world models:
-agents should be able to inspect a real environment, reason about its objects,
-and act on a simulated version. The playable platformer is the demo surface for
-that pipeline, not the end goal.
+world. `POST /generate` returns filtered object polygons, validated game rules,
+and resized canvas dimensions; the Phaser 3 frontend turns that response into a
+Matter.js platformer with keyboard and touch controls. This can become a
+lightweight source of varied scenes for robotics training and evaluation. The
+longer-term direction is interactive world models: agents should be able to
+inspect a real environment, reason about its objects, and act on a simulated
+version. The playable platformer is the demo surface for that pipeline, not the
+end goal.
 
 ## Which Meta models are used and how
 
@@ -41,22 +42,21 @@ Images API. A per-run cap of three images limits generation cost.
   through the Baseten partner endpoint using `meta-models/muse-spark-open-1026`;
   the forced-provider smoke test verifies that route independently.
 - **Best Agentic Use-Case:** The planned Phase 3 `/validate` critic-and-patch
-  retry loop targets this prize. The validation loop is not implemented in the
-  current Phase 0 scaffold.
+  retry loop targets this prize. The validation loop is not implemented yet.
 
 ## What was built during the hackathon
 
-The Phase 0 implementation and file-by-file provenance are listed in
+The implementation and file-by-file provenance are listed in
 [HACKATHON_SCOPE.md](./HACKATHON_SCOPE.md). Entries marked pre-existing were
 provided before this implementation and are not claimed as original work.
 
 ## Demo mode fallback
 
-Phase 4 is intended to add a pre-generated demo scene so judges can try the
-experience when APIs or Wi-Fi are unavailable. That frontend fallback is not
-implemented in Phase 1. The `/generate` endpoint can return fallback rules if
-Spark rules are invalid or time out, but image generation still requires SAM.
-The backend health endpoint can be checked without calling a model API.
+The frontend provides the live photo upload and game runtime. A pre-generated
+scene fallback is planned for Phase 4 and is not implemented yet. The
+`/generate` endpoint can return fallback rules if Spark rules are invalid or
+time out, but image generation still requires SAM. The backend health endpoint
+can be checked without calling a model API.
 
 ## Setup
 
@@ -68,13 +68,26 @@ values. Never commit `.env`.
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r backend/requirements.txt
+```
+
+Run the API from the `backend` directory:
+
+```bash
 cd backend
 uvicorn main:app --reload
 ```
 
-`GET http://localhost:8000/health` is the health check. Upload a photo as the
-`image` multipart field to `POST http://localhost:8000/generate`; optionally set
-the `theme` query parameter. Response coordinates use the resized canvas space.
+In another terminal, serve the static frontend from the project root (no build
+step or npm install):
+
+```bash
+python3 -m http.server 8001 --directory frontend
+```
+
+Open `http://localhost:8001`. The frontend sends photo uploads to
+`http://localhost:8000/generate`; optionally set the `theme` query parameter.
+`GET http://localhost:8000/health` is the API health check. Response
+coordinates use the resized canvas space.
 The Phase 0 SAM, Spark, and Muse Image smoke tests are run with
 `python backend/smoke_tests.py` from the project root after API access is
 configured. Phase 1 geometry and endpoint tests run without model API calls:
@@ -103,8 +116,6 @@ return pricing data.
 
 ## Submission status
 
-The repository must be public on GitHub before submission. No GitHub remote is
-configured yet; create the public repository and push the dated commits before
-the submission deadline. Keep the demo video to three minutes maximum and
-reserve Phase 6 for a single-take recording with demo mode enabled as the
-safety net.
+The public repository is [github.com/yahiaongh/room2game](https://github.com/yahiaongh/room2game).
+Keep the demo video to three minutes maximum and reserve Phase 6 for a
+single-take recording with demo mode enabled as the safety net.

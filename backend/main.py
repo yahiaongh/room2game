@@ -1,4 +1,5 @@
 import io
+import json
 import logging
 import math
 
@@ -160,7 +161,7 @@ def _fallback_rules(objects: list[dict], width: int, height: int, theme: str) ->
                     }
                 )
     return {
-        "player_start": {"x": float(width * 0.1), "y": float(height * 0.2)},
+        "player_start": {"x": float(width * 0.1), "y": float(height * 0.5)},
         "platforms": platforms,
         "hazards": hazards,
         "collectibles": collectibles,
@@ -173,7 +174,7 @@ def _inject_ground(objects: list[dict], rules: dict, width: int, height: int) ->
     if rules["platforms"]:
         return
 
-    ground_top = height * 0.9
+    ground_top = float(height * 0.9)
     object_index = len(objects)
     objects.append(
         {
@@ -209,12 +210,36 @@ def generate(
         raise HTTPException(status_code=400, detail="An image upload is required")
     image_bytes, canvas_width, canvas_height = _canvas_image(image.file.read())
 
+    debug_sam_status = ""
     try:
-        segmented_objects = segment_objects(
-            image_bytes,
-            concepts=SAM_CONCEPTS,
-        )
+        try:
+            segmented_objects = segment_objects(
+                image_bytes,
+                concepts=SAM_CONCEPTS,
+            )
+        except Exception as error:
+            response = getattr(error, "response", None)
+            status_code = getattr(error, "status_code", None)
+            debug_sam_status = (
+                f"HTTP {status_code}"
+                if status_code is not None
+                else f"{type(error).__name__}: {error}"
+            )
+            logger.exception("SAM segmentation failed: %s", debug_sam_status)
+            if response is not None:
+                try:
+                    raw_response = response.text
+                except (AttributeError, OSError, ValueError):
+                    raw_response = repr(response)
+                print(f"SAM raw API response: {raw_response}")
+            segmented_objects = []
+
+        if not segmented_objects and not debug_sam_status:
+            debug_sam_status = "Zero objects returned from API"
+            logger.warning("SAM debug status: %s", debug_sam_status)
+
         objects = []
+        filtered_by_polygon = 0
         for segmented in segmented_objects:
             bbox = segmented.get("bbox")
             if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
@@ -234,6 +259,7 @@ def generate(
                 canvas_height,
             )
             if polygon is None:
+                filtered_by_polygon += 1
                 continue
             objects.append(
                 {
@@ -244,6 +270,27 @@ def generate(
                 }
             )
 
+        if segmented_objects and not objects:
+            if filtered_by_polygon == len(segmented_objects):
+                debug_sam_status = (
+                    f"SAM returned {len(segmented_objects)} masks, but all were "
+                    "filtered out by area_ratio"
+                )
+                logger.warning("%s", debug_sam_status)
+            elif not debug_sam_status:
+                debug_sam_status = (
+                    f"SAM returned {len(segmented_objects)} masks, but none "
+                    "could be converted to usable objects"
+                )
+                logger.warning("SAM debug status: %s", debug_sam_status)
+        elif segmented_objects and not debug_sam_status:
+            debug_sam_status = (
+                f"SAM returned {len(segmented_objects)} masks; "
+                f"{len(objects)} objects retained"
+            )
+        logger.info("SAM debug status: %s", debug_sam_status)
+        print(f"SAM debug status: {debug_sam_status}")
+
         spark_objects = [
             {
                 "object_index": obj["object_index"],
@@ -253,18 +300,31 @@ def generate(
             }
             for obj in objects
         ]
-        try:
-            raw_rules = generate_game_rules(spark_objects)
-            rules = _validated_rules(
-                raw_rules, len(objects), canvas_width, canvas_height
+        if objects:
+            try:
+                raw_rules = generate_game_rules(spark_objects)
+                rules = _validated_rules(
+                    raw_rules, len(objects), canvas_width, canvas_height
+                )
+            except (
+                APITimeoutError,
+                APIConnectionError,
+                ValidationError,
+                ValueError,
+            ) as error:
+                fallback_reason = f"{type(error).__name__}: {error}"
+                logger.warning("Using fallback game rules: %s", fallback_reason)
+                rules = _fallback_rules(
+                    objects,
+                    canvas_width,
+                    canvas_height,
+                    theme,
+                )
+                record_fallback(fallback_reason)
+        else:
+            fallback_reason = (
+                f"SAM produced no usable objects: {debug_sam_status}"
             )
-        except (
-            APITimeoutError,
-            APIConnectionError,
-            ValidationError,
-            ValueError,
-        ) as error:
-            fallback_reason = f"{type(error).__name__}: {error}"
             logger.warning("Using fallback game rules: %s", fallback_reason)
             rules = _fallback_rules(
                 objects,
@@ -277,11 +337,18 @@ def generate(
         if not rules["platforms"]:
             raise RuntimeError("Scene generation failed to produce a ground platform")
 
-        return {
+        response_data = {
             "objects": objects,
             "rules": rules,
             "canvas": {"width": canvas_width, "height": canvas_height},
+            "meta": {"debug_sam_status": debug_sam_status},
         }
+        if objects:
+            print(
+                "First generated object JSON:",
+                json.dumps(objects[0], allow_nan=False, separators=(",", ":")),
+            )
+        return response_data
     except HTTPException:
         raise
     except (APIConnectionError, APIStatusError, ValueError) as error:

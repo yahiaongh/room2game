@@ -87,7 +87,9 @@ python3 -m http.server 8001 --directory frontend
 Open `http://localhost:8001`. The frontend sends photo uploads to
 `http://localhost:8000/generate`; optionally set the `theme` query parameter.
 `GET http://localhost:8000/health` is the API health check. Response
-coordinates use the resized canvas space.
+coordinates use the resized canvas space. `/generate` also returns a `meta`
+object with `debug_sam_status`, making SAM API failures, empty results, and
+filtered masks visible in the response and server log.
 The Phase 0 SAM, Spark, and Muse Image smoke tests are run with
 `python backend/smoke_tests.py` from the project root after API access is
 configured. Phase 1 geometry and endpoint tests run without model API calls:

@@ -40,17 +40,53 @@
     }
   }
 
-  function centerAndLocalVertices(vertices) {
-    if (!Array.isArray(vertices) || vertices.length < 3) {
-      throw new TypeError("A physics polygon needs at least three vertices.");
+  function toMatterVertices(object) {
+    let vertices = object.physics;
+    const hasValidCoordinates = Array.isArray(vertices)
+      && vertices.length >= 3
+      && vertices.every((point) => (
+        point
+        && typeof point.x === "number"
+        && Number.isFinite(point.x)
+        && typeof point.y === "number"
+        && Number.isFinite(point.y)
+      ));
+
+    if (!hasValidCoordinates) {
+      const error = new TypeError("Physics polygon coordinates must be finite numbers.");
+      console.error(
+        `Invalid physics polygon for ${object.label || "object"}; falling back to its bbox rectangle.`,
+        error,
+      );
+      if (!Array.isArray(object.bbox) || object.bbox.length !== 4) {
+        throw new TypeError("Cannot build a Matter rectangle without a four-value bbox.");
+      }
+      const [leftValue, topValue, rightValue, bottomValue] = object.bbox;
+      const left = Number(leftValue);
+      const top = Number(topValue);
+      const right = Number(rightValue);
+      const bottom = Number(bottomValue);
+      if (![left, top, right, bottom].every(Number.isFinite) || right <= left || bottom <= top) {
+        throw new TypeError("Cannot build a Matter rectangle from an invalid bbox.");
+      }
+      vertices = [
+        { x: left, y: top },
+        { x: right, y: top },
+        { x: right, y: bottom },
+        { x: left, y: bottom },
+      ];
     }
+
     const center = vertices.reduce(
       (sum, point) => ({ x: sum.x + point.x / vertices.length, y: sum.y + point.y / vertices.length }),
       { x: 0, y: 0 },
     );
     return {
       center,
-      local: vertices.map((point) => [point.x - center.x, point.y - center.y]),
+      local: vertices.map((point) => ({
+        x: point.x - center.x,
+        y: point.y - center.y,
+      })),
     };
   }
 
@@ -71,8 +107,8 @@
     const collected = new Set();
     const collectiblesById = new Map();
     const savedPlayerStart = {
-      x: Phaser.Math.Clamp(sceneData.rules.player_start.x, 0, width),
-      y: Phaser.Math.Clamp(sceneData.rules.player_start.y, 0, height),
+      x: Phaser.Math.Clamp(Number(sceneData.rules.player_start.x) || 0, 0, width),
+      y: Phaser.Math.Clamp(Number(sceneData.rules.player_start.y) || 0, 0, height),
     };
 
     class RoomScene extends Phaser.Scene {
@@ -202,7 +238,7 @@
       createRoleBodies(entries, role) {
         entries.forEach((entry) => {
           const object = sceneData.objects[entry.object_index];
-          const { center, local } = centerAndLocalVertices(object.physics);
+          const { center, local } = toMatterVertices(object);
           const category = CATEGORY[role];
           const body = this.matter.add.fromVertices(
             center.x,

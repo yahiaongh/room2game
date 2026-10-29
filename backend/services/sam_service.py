@@ -41,24 +41,37 @@ def _parse_objects(output_text: str, label: str) -> list[dict]:
         if box is None:
             continue
 
-        mask_bytes = decode_mask_to_raster(record.mask)
-        mask_image = Image.frombytes(
-            "L", (record.mask.width, record.mask.height), mask_bytes
-        ).convert("RGBA")
-        png_buffer = io.BytesIO()
-        mask_image.save(png_buffer, format="PNG")
+        mask_png_base64 = _decoded_mask_png_base64(
+            decode_mask_to_raster(record.mask),
+            record.mask.width,
+            record.mask.height,
+        )
         objects.append(
             {
                 "label": label,
-                "bbox": [box.left, box.top, box.right, box.bottom],
-                "mask_png_base64": base64.b64encode(
-                    png_buffer.getvalue()
-                ).decode("ascii"),
+                "bbox": [
+                    float(box.left),
+                    float(box.top),
+                    float(box.right),
+                    float(box.bottom),
+                ],
+                "mask_png_base64": mask_png_base64,
                 "width": record.mask.width,
                 "height": record.mask.height,
             }
         )
     return objects
+
+
+def _decoded_mask_png_base64(
+    mask_bytes: bytes, width: int, height: int
+) -> str:
+    if mask_bytes and max(mask_bytes) <= 1:
+        mask_bytes = bytes(value * 255 for value in mask_bytes)
+    mask_image = Image.frombytes("L", (width, height), mask_bytes).convert("RGBA")
+    png_buffer = io.BytesIO()
+    mask_image.save(png_buffer, format="PNG")
+    return base64.b64encode(png_buffer.getvalue()).decode("ascii")
 
 
 def segment_objects(

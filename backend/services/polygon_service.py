@@ -73,6 +73,8 @@ def mask_png_to_polygon(
     def clamp_vertices(contour: np.ndarray) -> list[dict[str, float]]:
         vertices = _vertices(contour)
         for vertex in vertices:
+            vertex["x"] = float(vertex["x"])
+            vertex["y"] = float(vertex["y"])
             rounded_x = round(vertex["x"])
             rounded_y = round(vertex["y"])
             if not (0 <= rounded_x <= canvas_width and 0 <= rounded_y <= canvas_height):

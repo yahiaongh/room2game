@@ -19,6 +19,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 import main
 from services import metrics_service
 from services.polygon_service import mask_png_to_polygon
+from services.sam_service import _decoded_mask_png_base64
 
 
 def make_mask(size: tuple[int, int], bounds: tuple[int, int, int, int]) -> bytes:
@@ -89,6 +90,22 @@ class PolygonServiceTests(unittest.TestCase):
         self.assertTrue(cv2.isContourConvex(physics))
 
 
+class SAMMaskTests(unittest.TestCase):
+    def test_scales_parser_binary_mask_values_for_polygon_threshold(self):
+        raw_mask = bytearray(100 * 100)
+        for y in range(10, 90):
+            for x in range(10, 90):
+                raw_mask[y * 100 + x] = 1
+
+        encoded_mask = _decoded_mask_png_base64(bytes(raw_mask), 100, 100)
+        decoded = base64.b64decode(encoded_mask)
+        polygon = mask_png_to_polygon(decoded, 100, 100)
+
+        self.assertIsNotNone(polygon)
+        assert polygon is not None
+        self.assertGreaterEqual(polygon["area_ratio"], 0.15)
+
+
 class GenerateEndpointTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(main.app)
@@ -136,7 +153,11 @@ class GenerateEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
-        self.assertEqual(set(payload), {"objects", "rules", "canvas"})
+        self.assertEqual(set(payload), {"objects", "rules", "canvas", "meta"})
+        self.assertEqual(
+            payload["meta"]["debug_sam_status"],
+            "SAM returned 1 masks; 1 objects retained",
+        )
         self.assertEqual(payload["canvas"], {"width": 1280, "height": 720})
         self.assertEqual(
             set(payload["objects"][0]),
@@ -144,6 +165,12 @@ class GenerateEndpointTests(unittest.TestCase):
         )
         self.assertEqual(payload["objects"][0]["label"], "mug")
         self.assertEqual(payload["rules"]["platforms"][0]["object_index"], 0)
+        first_object = payload["objects"][0]
+        self.assertTrue(all(type(value) is float for value in first_object["bbox"]))
+        for polygon_name in ("physics", "display"):
+            for point in first_object[polygon_name]:
+                self.assertIs(type(point["x"]), float)
+                self.assertIs(type(point["y"]), float)
         main.segment_objects.assert_called_once_with(
             ANY,
             concepts=[
@@ -205,17 +232,44 @@ class GenerateEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(
             response.json()["rules"]["player_start"],
-            {"x": 128.0, "y": 144.0},
+            {"x": 128.0, "y": 360.0},
         )
 
-    def test_upstream_segmentation_failure_is_reported_as_502(self):
+    def test_upstream_segmentation_failure_returns_visible_fallback_scene(self):
         with patch.object(
             main, "segment_objects", side_effect=ValueError("test SAM outage")
         ):
             response = self.post_generate()
 
-        self.assertEqual(response.status_code, 502)
-        self.assertIn("test SAM outage", response.json()["detail"])
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(
+            payload["meta"]["debug_sam_status"],
+            "ValueError: test SAM outage",
+        )
+        self.assertEqual(len(payload["objects"]), 1)
+        self.assertEqual(payload["objects"][0]["label"], "ground")
+        self.assertEqual(
+            payload["rules"]["player_start"],
+            {"x": 128.0, "y": 360.0},
+        )
+
+    def test_zero_sam_objects_are_reported_and_start_above_ground(self):
+        with (
+            patch.object(main, "segment_objects", return_value=[]),
+            patch.object(main, "generate_game_rules") as spark_mock,
+        ):
+            response = self.post_generate()
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(
+            payload["meta"]["debug_sam_status"],
+            "Zero objects returned from API",
+        )
+        self.assertEqual([obj["label"] for obj in payload["objects"]], ["ground"])
+        self.assertEqual(payload["rules"]["player_start"], {"x": 128.0, "y": 360.0})
+        spark_mock.assert_not_called()
 
     def test_fallback_roles_follow_area_and_plant_rules(self):
         objects = [
